@@ -5,7 +5,11 @@ import type { Database } from '../db/index.js';
 import { caseImages, cases } from '../db/schema.js';
 import { storeValidatedCaseImage } from '../lib/caseImageStore.js';
 import {
-  isPrivateOrLocalHostname,
+  fetchOpenAIFileRef,
+  fetchRemoteImageUrl,
+  parseOpenAIFileIdRefs,
+} from '../lib/openaiFiles.js';
+import {
   validateBase64Image,
   validateImageBuffer,
   type ImageValidationError,
@@ -169,62 +173,66 @@ async function loadAttachableCase(db: Database, caseId: string) {
   return { case: existing };
 }
 
-async function fetchRemoteImage(fileUrl: string) {
-  let url: URL;
-  try {
-    url = new URL(fileUrl);
-  } catch {
-    return {
-      status: 400 as const,
-      error: 'INVALID_URL',
-      message: 'file_url is not a valid URL',
-    };
-  }
-  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
-    return {
-      status: 400 as const,
-      error: 'INVALID_URL',
-      message: 'file_url must be http or https',
-    };
-  }
-  if (isPrivateOrLocalHostname(url.hostname)) {
-    return {
-      status: 400 as const,
-      error: 'URL_NOT_ALLOWED',
-      message: 'file_url host is not allowed',
-    };
+async function attachImagesFromBody(
+  db: Database,
+  caseId: string,
+  body: CaseBody,
+  res: import('express').Response,
+) {
+  const openaiRefs = parseOpenAIFileIdRefs(body);
+  if (openaiRefs.length > 0) {
+    const saved = [];
+    for (const ref of openaiRefs.slice(0, 10)) {
+      const fetched = await fetchOpenAIFileRef(ref);
+      if ('error' in fetched) {
+        sendValidationError(res, fetched);
+        return;
+      }
+      const filename = ref.name?.trim() || 'chat-upload.jpg';
+      saved.push(await storeValidatedCaseImage(db, caseId, fetched, filename));
+    }
+    if (saved.length === 1) {
+      res.status(201).json(saved[0]);
+    } else {
+      res.status(201).json({ success: true, count: saved.length, images: saved });
+    }
+    return;
   }
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 20_000);
-  try {
-    const res = await fetch(url.toString(), {
-      signal: controller.signal,
-      redirect: 'follow',
-      headers: { Accept: 'image/*,*/*' },
-    });
-    if (!res.ok) {
-      return {
-        status: 400 as const,
-        error: 'URL_FETCH_FAILED',
-        message: `Could not download file_url (HTTP ${res.status})`,
-      };
+  const fileUrl = asString(body.file_url).trim();
+  if (fileUrl) {
+    const fetched = await fetchRemoteImageUrl(fileUrl);
+    if ('error' in fetched) {
+      sendValidationError(res, fetched);
+      return;
     }
-    const contentType = res.headers.get('content-type')?.split(';')[0]?.trim() || null;
-    const arrayBuf = await res.arrayBuffer();
-    const buffer = Buffer.from(arrayBuf);
-    const validated = validateImageBuffer(buffer, contentType);
-    if ('error' in validated) return validated;
-    return validated;
-  } catch {
-    return {
-      status: 400 as const,
-      error: 'URL_FETCH_FAILED',
-      message: 'Could not download file_url',
-    };
-  } finally {
-    clearTimeout(timer);
+    const filename = asString(body.filename).trim() || 'download.jpg';
+    const saved = await storeValidatedCaseImage(db, caseId, fetched, filename);
+    res.status(201).json(saved);
+    return;
   }
+
+  const filename = asString(body.filename).trim() || 'upload.bin';
+  const contentType = asString(body.content_type).trim().toLowerCase();
+  const dataBase64 = asString(body.data_base64);
+
+  if (!dataBase64) {
+    res.status(400).json({
+      error: 'MISSING_IMAGE',
+      message:
+        'Provide openaiFileIdRefs (ChatGPT chat image), file_url, upload link, or valid data_base64.',
+    });
+    return;
+  }
+
+  const validated = validateBase64Image(dataBase64, contentType || null);
+  if ('error' in validated) {
+    sendValidationError(res, validated);
+    return;
+  }
+
+  const saved = await storeValidatedCaseImage(db, caseId, validated, filename);
+  res.status(201).json(saved);
 }
 
 export function agentRouter(db: Database) {
@@ -366,26 +374,7 @@ export function agentRouter(db: Database) {
         });
         return;
       }
-
-      const body = req.body as CaseBody;
-      const fileUrl = asString(body.file_url).trim();
-      const filename = asString(body.filename).trim() || 'download.jpg';
-      if (!fileUrl) {
-        res.status(400).json({
-          error: 'MISSING_FILE_URL',
-          message: 'file_url is required',
-        });
-        return;
-      }
-
-      const fetched = await fetchRemoteImage(fileUrl);
-      if ('error' in fetched) {
-        sendValidationError(res, fetched);
-        return;
-      }
-
-      const saved = await storeValidatedCaseImage(db, loaded.case.id, fetched, filename);
-      res.status(201).json(saved);
+      await attachImagesFromBody(db, loaded.case.id, req.body as CaseBody, res);
     }),
   );
 
@@ -457,44 +446,7 @@ export function agentRouter(db: Database) {
         });
         return;
       }
-
-      const body = req.body as CaseBody;
-
-      // Allow file_url on this path too for convenience
-      const fileUrl = asString(body.file_url).trim();
-      if (fileUrl) {
-        const fetched = await fetchRemoteImage(fileUrl);
-        if ('error' in fetched) {
-          sendValidationError(res, fetched);
-          return;
-        }
-        const filename = asString(body.filename).trim() || 'download.jpg';
-        const saved = await storeValidatedCaseImage(db, loaded.case.id, fetched, filename);
-        res.status(201).json(saved);
-        return;
-      }
-
-      const filename = asString(body.filename).trim() || 'upload.bin';
-      const contentType = asString(body.content_type).trim().toLowerCase();
-      const dataBase64 = asString(body.data_base64);
-
-      if (!dataBase64) {
-        res.status(400).json({
-          error: 'MISSING_IMAGE',
-          message:
-            'Provide multipart file via /images/upload, file_url, or valid data_base64. Do not send placeholder text.',
-        });
-        return;
-      }
-
-      const validated = validateBase64Image(dataBase64, contentType || null);
-      if ('error' in validated) {
-        sendValidationError(res, validated);
-        return;
-      }
-
-      const saved = await storeValidatedCaseImage(db, loaded.case.id, validated, filename);
-      res.status(201).json(saved);
+      await attachImagesFromBody(db, loaded.case.id, req.body as CaseBody, res);
     }),
   );
 

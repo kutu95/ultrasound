@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Ultrasound Ledger Agent API
-  version: 1.1.0
+  version: 1.1.1
   description: >
     Create and edit ultrasound case reports and attach screenshot images.
     Prefer getCaseImageUploadLink for ChatGPT (user opens a browser upload page).
@@ -45,7 +45,26 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/Case'
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                    exam_date:
+                      type: string
+                    owner_surname:
+                      type: string
+                    pet_name:
+                      type: string
+                    species:
+                      type: string
+                    exam_type:
+                      type: string
+                    findings_text:
+                      type: string
+                    conclusion_text:
+                      type: string
+                    invoice_id:
+                      type: string
     post:
       operationId: createCase
       summary: Create a case report
@@ -54,14 +73,70 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CaseCreate'
+              type: object
+              required:
+                - exam_date
+                - owner_surname
+                - pet_name
+                - exam_type
+              properties:
+                exam_date:
+                  type: string
+                  description: YYYY-MM-DD
+                owner_surname:
+                  type: string
+                pet_name:
+                  type: string
+                species:
+                  type: string
+                exam_type:
+                  type: string
+                  description: Echocardiography, Abdominal ultrasound, Pregnancy diagnosis, or Other
+                findings_text:
+                  type: string
+                conclusion_text:
+                  type: string
+                image_notes:
+                  type: string
+                standard_fee:
+                  type: number
+                actual_fee:
+                  type: number
+                is_free:
+                  type: boolean
+                free_reason:
+                  type: string
+                billing_note:
+                  type: string
       responses:
         '201':
-          description: Created case (includes upload_url for screenshots)
+          description: Created case including upload_url for screenshots
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CaseCreated'
+                type: object
+                properties:
+                  id:
+                    type: string
+                  exam_date:
+                    type: string
+                  owner_surname:
+                    type: string
+                  pet_name:
+                    type: string
+                  species:
+                    type: string
+                  exam_type:
+                    type: string
+                  findings_text:
+                    type: string
+                  conclusion_text:
+                    type: string
+                  upload_url:
+                    type: string
+                    description: Open this link to attach screenshots in a browser
+                  case_url:
+                    type: string
   /api/agent/cases/{id}:
     get:
       operationId: getCase
@@ -78,7 +153,26 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Case'
+                type: object
+                properties:
+                  id:
+                    type: string
+                  exam_date:
+                    type: string
+                  owner_surname:
+                    type: string
+                  pet_name:
+                    type: string
+                  species:
+                    type: string
+                  exam_type:
+                    type: string
+                  findings_text:
+                    type: string
+                  conclusion_text:
+                    type: string
+                  invoice_id:
+                    type: string
     patch:
       operationId: updateCase
       summary: Edit a case report (not allowed if invoiced)
@@ -93,14 +187,48 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CasePatch'
+              type: object
+              properties:
+                exam_date:
+                  type: string
+                owner_surname:
+                  type: string
+                pet_name:
+                  type: string
+                species:
+                  type: string
+                exam_type:
+                  type: string
+                findings_text:
+                  type: string
+                conclusion_text:
+                  type: string
+                image_notes:
+                  type: string
+                standard_fee:
+                  type: number
+                actual_fee:
+                  type: number
+                is_free:
+                  type: boolean
+                free_reason:
+                  type: string
+                billing_note:
+                  type: string
       responses:
         '200':
           description: Updated case
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Case'
+                type: object
+                properties:
+                  id:
+                    type: string
+                  findings_text:
+                    type: string
+                  conclusion_text:
+                    type: string
   /api/agent/cases/{id}/upload-link:
     get:
       operationId: getCaseImageUploadLink
@@ -152,14 +280,28 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/CaseImage'
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                    case_id:
+                      type: string
+                    original_name:
+                      type: string
+                    mime_type:
+                      type: string
+                    size_bytes:
+                      type: integer
+                    success:
+                      type: boolean
     post:
       operationId: attachCaseImage
-      summary: Attach image via Base64 or file_url (legacy)
+      summary: Attach image(s) from ChatGPT chat upload
       description: >
-        Prefer getCaseImageUploadLink. If using this action, provide either a
-        real https file_url OR valid data_base64 image bytes. Never invent
-        placeholder Base64.
+        PREFERRED when the user attaches an image in the ChatGPT chat.
+        OpenAI injects openaiFileIdRefs with temporary download_link URLs.
+        Do NOT pass /mnt/data paths or invent Base64. For manual upload without
+        chat attachment, use getCaseImageUploadLink instead.
       parameters:
         - name: id
           in: path
@@ -171,14 +313,45 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ImageAttach'
+              type: object
+              properties:
+                openaiFileIdRefs:
+                  type: array
+                  description: >
+                    ChatGPT injects this when the user uploaded image(s) in chat.
+                    Each item has name, id, mime_type, download_link.
+                  items:
+                    type: string
+                filename:
+                  type: string
+                file_url:
+                  type: string
+                  description: Public HTTPS URL only — not /mnt/data paths
+                content_type:
+                  type: string
+                data_base64:
+                  type: string
+                  description: Legacy — real base64 only, never placeholder text
       responses:
         '201':
           description: Attached image
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CaseImage'
+                type: object
+                properties:
+                  id:
+                    type: string
+                  case_id:
+                    type: string
+                  original_name:
+                    type: string
+                  mime_type:
+                    type: string
+                  size_bytes:
+                    type: integer
+                  success:
+                    type: boolean
   /api/agent/cases/{id}/images/from-url:
     post:
       operationId: attachCaseImageFromUrl
@@ -209,41 +382,14 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CaseImage'
-  /api/agent/cases/{id}/images/upload:
-    post:
-      operationId: attachCaseImageFile
-      summary: Attach image via multipart file upload
-      description: >
-        Multipart form field name is "file". ChatGPT Actions often cannot send
-        true binary; prefer getCaseImageUploadLink instead.
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-      requestBody:
-        required: true
-        content:
-          multipart/form-data:
-            schema:
-              type: object
-              required:
-                - file
-              properties:
-                file:
-                  type: string
-                  format: binary
-                filename:
-                  type: string
-      responses:
-        '201':
-          description: Attached image
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/CaseImage'
+                type: object
+                properties:
+                  id:
+                    type: string
+                  success:
+                    type: boolean
+                  size_bytes:
+                    type: integer
 components:
   securitySchemes:
     ApiKeyAuth:
@@ -251,203 +397,8 @@ components:
       in: header
       name: X-API-Key
   schemas:
-    Case:
+    Empty:
       type: object
       properties:
-        id:
-          type: string
-        exam_date:
-          type: string
-        owner_surname:
-          type: string
-        pet_name:
-          type: string
-        species:
-          type: string
-        exam_type:
-          type: string
-        findings_text:
-          type: string
-        conclusion_text:
-          type: string
-        image_notes:
-          type: string
-        standard_fee:
-          type: number
-        actual_fee:
-          type: number
-        is_free:
+        ok:
           type: boolean
-        free_reason:
-          type: string
-        billing_note:
-          type: string
-        invoice_id:
-          type: string
-        created_at:
-          type: string
-        updated_at:
-          type: string
-      required:
-        - id
-        - exam_date
-        - owner_surname
-        - pet_name
-        - exam_type
-        - findings_text
-        - conclusion_text
-    CaseCreated:
-      type: object
-      properties:
-        id:
-          type: string
-        exam_date:
-          type: string
-        owner_surname:
-          type: string
-        pet_name:
-          type: string
-        species:
-          type: string
-        exam_type:
-          type: string
-        findings_text:
-          type: string
-        conclusion_text:
-          type: string
-        image_notes:
-          type: string
-        standard_fee:
-          type: number
-        actual_fee:
-          type: number
-        is_free:
-          type: boolean
-        free_reason:
-          type: string
-        billing_note:
-          type: string
-        invoice_id:
-          type: string
-        created_at:
-          type: string
-        updated_at:
-          type: string
-        upload_url:
-          type: string
-          description: Open this link to attach screenshots in a browser
-        case_url:
-          type: string
-      required:
-        - id
-        - exam_date
-        - owner_surname
-        - pet_name
-        - exam_type
-        - findings_text
-        - conclusion_text
-        - upload_url    CaseCreate:
-      type: object
-      required:
-        - exam_date
-        - owner_surname
-        - pet_name
-        - exam_type
-      properties:
-        exam_date:
-          type: string
-        owner_surname:
-          type: string
-        pet_name:
-          type: string
-        species:
-          type: string
-        exam_type:
-          type: string
-        findings_text:
-          type: string
-        conclusion_text:
-          type: string
-        image_notes:
-          type: string
-        standard_fee:
-          type: number
-        actual_fee:
-          type: number
-        is_free:
-          type: boolean
-        free_reason:
-          type: string
-        billing_note:
-          type: string
-    CasePatch:
-      type: object
-      properties:
-        exam_date:
-          type: string
-        owner_surname:
-          type: string
-        pet_name:
-          type: string
-        species:
-          type: string
-        exam_type:
-          type: string
-        findings_text:
-          type: string
-        conclusion_text:
-          type: string
-        image_notes:
-          type: string
-        standard_fee:
-          type: number
-        actual_fee:
-          type: number
-        is_free:
-          type: boolean
-        free_reason:
-          type: string
-        billing_note:
-          type: string
-    ImageAttach:
-      type: object
-      properties:
-        filename:
-          type: string
-        content_type:
-          type: string
-          description: image/jpeg, image/png, image/webp, or image/gif
-        data_base64:
-          type: string
-          description: Real base64 image bytes only — never placeholder text
-        file_url:
-          type: string
-          description: Alternative to data_base64 — public HTTPS image URL
-    CaseImage:
-      type: object
-      properties:
-        id:
-          type: string
-        case_id:
-          type: string
-        original_name:
-          type: string
-        mime_type:
-          type: string
-        size_bytes:
-          type: integer
-        sort_order:
-          type: integer
-        created_at:
-          type: string
-        url:
-          type: string
-        success:
-          type: boolean
-      required:
-        - id
-        - case_id
-        - original_name
-        - mime_type
-        - size_bytes
-        - success

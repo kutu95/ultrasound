@@ -12,7 +12,7 @@
     "start": "NODE_ENV=production tsx server/index.ts",
     "db:migrate": "tsx server/migrate.ts",
     "db:seed": "tsx server/seed.ts",
-    "test": "tsx --test server/lib/imageValidation.test.ts",
+    "test": "tsx --test server/lib/imageValidation.test.ts server/lib/openaiFiles.test.ts",
     "lint": "eslint ."
   },
   "dependencies": {
