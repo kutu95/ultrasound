@@ -6,7 +6,8 @@ import session from 'express-session';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createDb, createPool } from './db/index.js';
-import { requireAuth } from './middleware/auth.js';
+import { requireAgentAuth, requireAuth } from './middleware/auth.js';
+import { agentRouter } from './routes/agent.js';
 import { authRouter, ensureAdminUser } from './routes/auth.js';
 import { casesRouter, dashboardRouter, settingsRouter } from './routes/cases.js';
 import { invoicesRouter } from './routes/invoices.js';
@@ -29,7 +30,8 @@ app.use(
     credentials: true,
   }),
 );
-app.use(express.json());
+// Raised limit so ChatGPT agent can POST base64 screenshots
+app.use(express.json({ limit: '20mb' }));
 
 app.use(
   session({
@@ -51,6 +53,9 @@ app.get('/api/health', (_req, res) => {
 });
 
 app.use('/api/auth', authRouter(db));
+
+// ChatGPT Custom GPT Actions — API key auth; mounted outside session wall
+app.use('/api/agent', requireAgentAuth, agentRouter(db));
 
 app.use('/api', requireAuth);
 app.use('/api/settings', settingsRouter(db));

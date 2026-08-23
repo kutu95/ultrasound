@@ -38,8 +38,26 @@ export function generateReportEmail(c: {
   exam_date: string;
   findings_text: string;
   image_notes: string;
+  image_count?: number;
 }): { subject: string; body: string } {
   const subject = `Ultrasound report — ${c.pet_name} ${c.owner_surname} — ${c.exam_date}`;
+
+  const imageLines: string[] = [];
+  if (c.image_count && c.image_count > 0) {
+    imageLines.push(
+      `Images attached: ${c.image_count} screenshot${c.image_count === 1 ? '' : 's'} on file`,
+    );
+  }
+  if (c.image_notes.trim()) {
+    imageLines.push(
+      c.image_count && c.image_count > 0
+        ? `Image notes: ${c.image_notes}`
+        : `Images attached: ${c.image_notes}`,
+    );
+  }
+  if (imageLines.length === 0) {
+    imageLines.push('Images attached: none');
+  }
 
   const body = [
     `Patient: ${c.pet_name}`,
@@ -50,7 +68,7 @@ export function generateReportEmail(c: {
     '',
     c.findings_text,
     '',
-    `Images attached: ${c.image_notes}`,
+    ...imageLines,
   ].join('\n');
 
   return { subject, body };

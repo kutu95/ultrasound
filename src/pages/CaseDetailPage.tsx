@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import CaseForm from '../components/CaseForm';
+import CaseImages from '../components/CaseImages';
 import { FreeBadge } from '../components/StatusBadge';
 import { deleteCase, fetchCase, updateCase } from '../lib/api';
 import { formatCurrency, formatDate } from '../lib/format';
@@ -65,10 +66,15 @@ export default function CaseDetailPage() {
           <Link to={`/cases/${id}/report`} className="btn btn-primary">
             Generate report
           </Link>
-          {!editing && (
+          {!editing && !caseData.invoice_id && (
             <button className="btn btn-secondary" onClick={() => setEditing(true)}>
               Edit
             </button>
+          )}
+          {caseData.invoice_id && !editing && (
+            <span className="text-muted" style={{ fontSize: '0.875rem' }}>
+              Invoiced — report locked
+            </span>
           )}
           {!caseData.invoice_id && (
             <button className="btn btn-danger" onClick={handleDelete}>
@@ -120,11 +126,17 @@ export default function CaseDetailPage() {
             <dd>{caseData.conclusion_text || '—'}</dd>
             <dt className="text-muted">Report</dt>
             <dd style={{ whiteSpace: 'pre-wrap' }}>{caseData.findings_text || '—'}</dd>
-            <dt className="text-muted">Images</dt>
-            <dd>{caseData.image_notes || '—'}</dd>
+            {caseData.image_notes && (
+              <>
+                <dt className="text-muted">Image notes</dt>
+                <dd>{caseData.image_notes}</dd>
+              </>
+            )}
           </dl>
         </div>
       )}
+
+      {id && <CaseImages caseId={id} readOnly={Boolean(caseData.invoice_id)} />}
     </>
   );
 }

@@ -1,0 +1,390 @@
+openapi: 3.1.0
+info:
+  title: Ultrasound Ledger Agent API
+  version: 1.0.0
+  description: >
+    Narrow API for ChatGPT Custom GPT Actions. Create and edit ultrasound case
+    reports and attach screenshot images. Does not support delete. Invoiced
+    cases are read-only.
+servers:
+  - url: https://ultrasound.margies.app
+paths:
+  /api/agent/cases:
+    get:
+      operationId: listCases
+      summary: Search or list case reports
+      description: Find cases by exam date, pet name, and/or owner surname.
+      parameters:
+        - name: exam_date
+          in: query
+          schema:
+            type: string
+            format: date
+          description: Exact exam date (YYYY-MM-DD)
+        - name: pet_name
+          in: query
+          schema:
+            type: string
+          description: Partial pet name match (case-insensitive)
+        - name: owner_surname
+          in: query
+          schema:
+            type: string
+          description: Partial owner surname match (case-insensitive)
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+      responses:
+        '200':
+          description: Matching cases
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Case'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      operationId: createCase
+      summary: Create a case report
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CaseCreate'
+      responses:
+        '201':
+          description: Created case
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+  /api/agent/cases/{id}:
+    get:
+      operationId: getCase
+      summary: Get one case report
+      parameters:
+        - $ref: '#/components/parameters/CaseId'
+      responses:
+        '200':
+          description: Case
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    patch:
+      operationId: updateCase
+      summary: Edit a case report
+      description: Fails with 403 if the case has already been invoiced.
+      parameters:
+        - $ref: '#/components/parameters/CaseId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CasePatch'
+      responses:
+        '200':
+          description: Updated case
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/agent/cases/{id}/images:
+    get:
+      operationId: listCaseImages
+      summary: List images attached to a case
+      parameters:
+        - $ref: '#/components/parameters/CaseId'
+      responses:
+        '200':
+          description: Image metadata list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CaseImage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    post:
+      operationId: attachCaseImage
+      summary: Attach a screenshot image to a case
+      description: >
+        Send the image as base64 JSON. Fails with 403 if the case is invoiced.
+        Allowed types JPEG, PNG, WebP, GIF.
+      parameters:
+        - $ref: '#/components/parameters/CaseId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImageAttach'
+      responses:
+        '201':
+          description: Attached image metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseImage'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: Agent API key (AGENT_API_KEY). Bearer tokens in Authorization are also accepted.
+  parameters:
+    CaseId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+  schemas:
+    ExamType:
+      type: string
+      enum:
+        - Echocardiography
+        - Abdominal ultrasound
+        - Pregnancy diagnosis
+        - Other
+    Case:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        exam_date:
+          type: string
+          format: date
+        owner_surname:
+          type: string
+        pet_name:
+          type: string
+        species:
+          type: string
+        exam_type:
+          $ref: '#/components/schemas/ExamType'
+        findings_text:
+          type: string
+          description: Full ultrasound report text
+        conclusion_text:
+          type: string
+          description: Short summary label
+        image_notes:
+          type: string
+        standard_fee:
+          type: number
+        actual_fee:
+          type: number
+        is_free:
+          type: boolean
+        free_reason:
+          type: string
+          nullable: true
+        billing_note:
+          type: string
+          nullable: true
+        invoice_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: When set, the case is read-only
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - exam_date
+        - owner_surname
+        - pet_name
+        - exam_type
+        - findings_text
+        - conclusion_text
+    CaseCreate:
+      type: object
+      required:
+        - exam_date
+        - owner_surname
+        - pet_name
+        - exam_type
+      properties:
+        exam_date:
+          type: string
+          format: date
+        owner_surname:
+          type: string
+        pet_name:
+          type: string
+        species:
+          type: string
+          default: dog
+        exam_type:
+          $ref: '#/components/schemas/ExamType'
+        findings_text:
+          type: string
+          description: Full ultrasound report text
+        conclusion_text:
+          type: string
+          description: Short summary label
+        image_notes:
+          type: string
+        standard_fee:
+          type: number
+          default: 150
+        actual_fee:
+          type: number
+          default: 150
+        is_free:
+          type: boolean
+          default: false
+        free_reason:
+          type: string
+        billing_note:
+          type: string
+    CasePatch:
+      type: object
+      description: Partial update; omit fields you do not want to change.
+      properties:
+        exam_date:
+          type: string
+          format: date
+        owner_surname:
+          type: string
+        pet_name:
+          type: string
+        species:
+          type: string
+        exam_type:
+          $ref: '#/components/schemas/ExamType'
+        findings_text:
+          type: string
+        conclusion_text:
+          type: string
+        image_notes:
+          type: string
+        standard_fee:
+          type: number
+        actual_fee:
+          type: number
+        is_free:
+          type: boolean
+        free_reason:
+          type: string
+        billing_note:
+          type: string
+    ImageAttach:
+      type: object
+      required:
+        - content_type
+        - data_base64
+      properties:
+        filename:
+          type: string
+          example: kidney.png
+        content_type:
+          type: string
+          enum:
+            - image/jpeg
+            - image/png
+            - image/webp
+            - image/gif
+        data_base64:
+          type: string
+          description: Raw or data-URL base64 image bytes
+    CaseImage:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        case_id:
+          type: string
+          format: uuid
+        original_name:
+          type: string
+        mime_type:
+          type: string
+        size_bytes:
+          type: integer
+        sort_order:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+        url:
+          type: string
+          description: Authenticated web UI image URL (session cookie required)
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
+  responses:
+    Unauthorized:
+      description: Missing or invalid API key
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Case is invoiced and cannot be modified
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Case not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+security:
+  - ApiKeyAuth: []

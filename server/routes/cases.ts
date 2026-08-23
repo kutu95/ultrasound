@@ -1,8 +1,24 @@
 import { Router } from 'express';
-import { and, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, isNull, sql } from 'drizzle-orm';
+import fs from 'node:fs';
+import multer from 'multer';
 import type { Database } from '../db/index.js';
-import { cases, settings } from '../db/schema.js';
-import { serializeCase, serializeInvoiceBalance, serializeSettings } from '../lib/serialize.js';
+import { caseImages, cases, settings } from '../db/schema.js';
+import {
+  serializeCase,
+  serializeCaseImage,
+  serializeInvoiceBalance,
+  serializeSettings,
+} from '../lib/serialize.js';
+import {
+  caseImagePath,
+  deleteCaseUploadDir,
+  deleteStoredFile,
+  ensureCaseUploadDir,
+  getMaxUploadBytes,
+  isAllowedImageMime,
+  makeStoredName,
+} from '../lib/uploads.js';
 import { asyncHandler } from '../middleware/auth.js';
 
 export function settingsRouter(db: Database) {
@@ -55,6 +71,36 @@ export function settingsRouter(db: Database) {
 
 export function casesRouter(db: Database) {
   const router = Router();
+  const upload = multer({
+    storage: multer.diskStorage({
+      destination: (req, _file, cb) => {
+        try {
+          cb(null, ensureCaseUploadDir(req.params.id));
+        } catch (err) {
+          cb(err as Error, '');
+        }
+      },
+      filename: (_req, file, cb) => {
+        cb(null, makeStoredName(file.mimetype));
+      },
+    }),
+    limits: {
+      fileSize: getMaxUploadBytes(),
+      files: 20,
+    },
+    fileFilter: (_req, file, cb) => {
+      if (!isAllowedImageMime(file.mimetype)) {
+        cb(new Error('Only JPEG, PNG, WebP, and GIF images are allowed'));
+        return;
+      }
+      cb(null, true);
+    },
+  });
+
+  async function assertCaseExists(caseId: string) {
+    const [row] = await db.select({ id: cases.id }).from(cases).where(eq(cases.id, caseId)).limit(1);
+    return row ?? null;
+  }
 
   router.get(
     '/',
@@ -86,6 +132,155 @@ export function casesRouter(db: Database) {
         .orderBy(desc(cases.createdAt))
         .limit(limit);
       res.json(rows.map(serializeCase));
+    }),
+  );
+
+  router.get(
+    '/:id/images',
+    asyncHandler(async (req, res) => {
+      if (!(await assertCaseExists(req.params.id))) {
+        res.status(404).json({ error: 'Case not found' });
+        return;
+      }
+      const rows = await db
+        .select()
+        .from(caseImages)
+        .where(eq(caseImages.caseId, req.params.id))
+        .orderBy(asc(caseImages.sortOrder), asc(caseImages.createdAt));
+      res.json(rows.map(serializeCaseImage));
+    }),
+  );
+
+  router.post(
+    '/:id/images',
+    (req, res, next) => {
+      upload.array('images', 20)(req, res, (err) => {
+        if (err) {
+          const message =
+            err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE'
+              ? 'Image is too large'
+              : err.message || 'Upload failed';
+          res.status(400).json({ error: message });
+          return;
+        }
+        next();
+      });
+    },
+    asyncHandler(async (req, res) => {
+      const caseId = req.params.id;
+      const [existing] = await db.select().from(cases).where(eq(cases.id, caseId)).limit(1);
+      if (!existing) {
+        for (const file of (req.files as Express.Multer.File[] | undefined) ?? []) {
+          deleteStoredFile(caseId, file.filename);
+        }
+        res.status(404).json({ error: 'Case not found' });
+        return;
+      }
+      if (existing.invoiceId) {
+        for (const file of (req.files as Express.Multer.File[] | undefined) ?? []) {
+          deleteStoredFile(caseId, file.filename);
+        }
+        res.status(403).json({ error: 'Cannot attach images to an invoiced case' });
+        return;
+      }
+
+      const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+      if (files.length === 0) {
+        res.status(400).json({ error: 'No images uploaded' });
+        return;
+      }
+
+      const [{ maxOrder }] = await db
+        .select({
+          maxOrder: sql<number>`coalesce(max(${caseImages.sortOrder}), -1)`,
+        })
+        .from(caseImages)
+        .where(eq(caseImages.caseId, caseId));
+
+      const created = [];
+      let order = Number(maxOrder) + 1;
+      for (const file of files) {
+        const [row] = await db
+          .insert(caseImages)
+          .values({
+            caseId,
+            storedName: file.filename,
+            originalName: file.originalname || file.filename,
+            mimeType: file.mimetype,
+            sizeBytes: file.size,
+            sortOrder: order,
+          })
+          .returning();
+        created.push(serializeCaseImage(row));
+        order += 1;
+      }
+
+      res.status(201).json(created);
+    }),
+  );
+
+  router.get(
+    '/:id/images/:imageId',
+    asyncHandler(async (req, res) => {
+      const [row] = await db
+        .select()
+        .from(caseImages)
+        .where(
+          and(eq(caseImages.id, req.params.imageId), eq(caseImages.caseId, req.params.id)),
+        )
+        .limit(1);
+
+      if (!row) {
+        res.status(404).json({ error: 'Image not found' });
+        return;
+      }
+
+      const filePath = caseImagePath(row.caseId, row.storedName);
+      if (!fs.existsSync(filePath)) {
+        res.status(404).json({ error: 'Image file missing' });
+        return;
+      }
+
+      res.setHeader('Content-Type', row.mimeType);
+      res.setHeader('Content-Disposition', `inline; filename="${row.originalName.replace(/"/g, '')}"`);
+      res.setHeader('Cache-Control', 'private, max-age=3600');
+      fs.createReadStream(filePath).pipe(res);
+    }),
+  );
+
+  router.delete(
+    '/:id/images/:imageId',
+    asyncHandler(async (req, res) => {
+      const [caseRow] = await db
+        .select()
+        .from(cases)
+        .where(eq(cases.id, req.params.id))
+        .limit(1);
+      if (!caseRow) {
+        res.status(404).json({ error: 'Case not found' });
+        return;
+      }
+      if (caseRow.invoiceId) {
+        res.status(403).json({ error: 'Cannot modify images on an invoiced case' });
+        return;
+      }
+
+      const [row] = await db
+        .select()
+        .from(caseImages)
+        .where(
+          and(eq(caseImages.id, req.params.imageId), eq(caseImages.caseId, req.params.id)),
+        )
+        .limit(1);
+
+      if (!row) {
+        res.status(404).json({ error: 'Image not found' });
+        return;
+      }
+
+      await db.delete(caseImages).where(eq(caseImages.id, row.id));
+      deleteStoredFile(row.caseId, row.storedName);
+      res.status(204).end();
     }),
   );
 
@@ -133,6 +328,21 @@ export function casesRouter(db: Database) {
   router.put(
     '/:id',
     asyncHandler(async (req, res) => {
+      const [existing] = await db
+        .select()
+        .from(cases)
+        .where(eq(cases.id, req.params.id))
+        .limit(1);
+
+      if (!existing) {
+        res.status(404).json({ error: 'Case not found' });
+        return;
+      }
+      if (existing.invoiceId) {
+        res.status(403).json({ error: 'Cannot edit an invoiced case' });
+        return;
+      }
+
       const body = req.body;
       const isFree = Boolean(body.is_free);
 
@@ -152,14 +362,11 @@ export function casesRouter(db: Database) {
           isFree,
           freeReason: isFree ? body.free_reason || null : null,
           billingNote: body.billing_note || null,
+          updatedAt: new Date(),
         })
         .where(eq(cases.id, req.params.id))
         .returning();
 
-      if (!row) {
-        res.status(404).json({ error: 'Case not found' });
-        return;
-      }
       res.json(serializeCase(row));
     }),
   );
@@ -206,6 +413,7 @@ export function casesRouter(db: Database) {
       }
 
       await db.delete(cases).where(eq(cases.id, req.params.id));
+      deleteCaseUploadDir(req.params.id);
       res.status(204).end();
     }),
   );

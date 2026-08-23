@@ -42,6 +42,17 @@ export interface UltrasoundCase {
   updated_at: string;
 }
 
+export interface CaseImage {
+  id: string;
+  case_id: string;
+  original_name: string;
+  mime_type: string;
+  size_bytes: number;
+  sort_order: number;
+  created_at: string;
+  url: string;
+}
+
 export interface Invoice {
   id: string;
   invoice_number: string;

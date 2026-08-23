@@ -24,8 +24,8 @@ async function migrate() {
       console.log(`Using schema ${schemaName}`);
     }
 
-    // Ensure migration tracking and DDL land in the app schema
-    await pool.query(`SET search_path TO ${schemaIdent}, public, extensions`);
+    // Ensure migration tracking and DDL land in the app schema only
+    await pool.query(`SET search_path TO ${schemaIdent}, extensions`);
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -55,7 +55,7 @@ async function migrate() {
       console.log(`Applying ${file}…`);
       await pool.query('BEGIN');
       try {
-        await pool.query(`SET LOCAL search_path TO ${schemaIdent}, public, extensions`);
+        await pool.query(`SET LOCAL search_path TO ${schemaIdent}, extensions`);
         await pool.query(sql);
         await pool.query('INSERT INTO schema_migrations (version) VALUES ($1)', [version]);
         await pool.query('COMMIT');

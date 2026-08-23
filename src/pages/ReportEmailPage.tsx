@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { fetchCase } from '../lib/api';
+import { fetchCase, fetchCaseImages } from '../lib/api';
 import { generateReportEmail } from '../lib/format';
 
 export default function ReportEmailPage() {
@@ -13,11 +13,11 @@ export default function ReportEmailPage() {
 
   useEffect(() => {
     if (!id) return;
-    fetchCase(id)
-      .then((c) => {
+    Promise.all([fetchCase(id), fetchCaseImages(id)])
+      .then(([c, images]) => {
         if (!c) throw new Error('Case not found');
         setPetName(c.pet_name);
-        setReport(generateReportEmail(c));
+        setReport(generateReportEmail({ ...c, image_count: images.length }));
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'))
       .finally(() => setLoading(false));

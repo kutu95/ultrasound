@@ -77,6 +77,19 @@ export const cases = pgTable('cases', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+export const caseImages = pgTable('case_images', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  caseId: uuid('case_id')
+    .notNull()
+    .references(() => cases.id, { onDelete: 'cascade' }),
+  storedName: text('stored_name').notNull(),
+  originalName: text('original_name').notNull(),
+  mimeType: text('mime_type').notNull(),
+  sizeBytes: integer('size_bytes').notNull(),
+  sortOrder: integer('sort_order').notNull().default(0),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const invoices = pgTable('invoices', {
   id: uuid('id').primaryKey().defaultRandom(),
   invoiceNumber: text('invoice_number').notNull().unique(),

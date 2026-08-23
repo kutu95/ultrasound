@@ -25,10 +25,16 @@ export function getDatabaseUrl(): string {
 
 export function createPool() {
   const schemaName = getDatabaseSchema();
+  // Do not put public first — app DDL/DML must land in the app schema.
+  // Keep extensions available for gen_random_uuid() on shared Supabase Postgres.
+  const searchPath =
+    schemaName === 'public'
+      ? undefined
+      : `-c search_path=${schemaName},extensions`;
+
   return new Pool({
     connectionString: getDatabaseUrl(),
-    // Keep app tables in their own schema on the shared server Postgres
-    options: schemaName === 'public' ? undefined : `-c search_path=${schemaName},public,extensions`,
+    options: searchPath,
   });
 }
 

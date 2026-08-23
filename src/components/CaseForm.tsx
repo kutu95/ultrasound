@@ -194,14 +194,17 @@ export default function CaseForm({ initial, onSubmit, onCancel }: CaseFormProps)
       </div>
 
       <div>
-        <label htmlFor="image_notes">Image notes</label>
+        <label htmlFor="image_notes">Image notes (optional)</label>
         <input
           id="image_notes"
           type="text"
           value={form.image_notes}
           onChange={(e) => update('image_notes', e.target.value)}
-          placeholder="e.g. 12 images saved to PACS"
+          placeholder="e.g. also saved to PACS"
         />
+        <p className="text-muted" style={{ fontSize: '0.8125rem', margin: '0.25rem 0 0' }}>
+          Screenshots are attached on the case page after saving.
+        </p>
       </div>
 
       <div className="form-row form-row-2">

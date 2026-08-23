@@ -50,6 +50,7 @@ export async function fetchMe(): Promise<AuthUser> {
 // Re-export domain API from same module pattern
 import type {
   CaseFormData,
+  CaseImage,
   Invoice,
   InvoiceBalance,
   InvoiceItem,
@@ -59,6 +60,8 @@ import type {
   StatementResult,
   UltrasoundCase,
 } from '../types/database';
+
+export type { CaseImage };
 
 export async function fetchSettings(): Promise<Settings | null> {
   return apiFetch('/api/settings');
@@ -96,6 +99,34 @@ export async function updateCase(id: string, form: CaseFormData): Promise<Ultras
 
 export async function deleteCase(id: string): Promise<void> {
   await apiFetch(`/api/cases/${id}`, { method: 'DELETE' });
+}
+
+export async function fetchCaseImages(caseId: string): Promise<CaseImage[]> {
+  return apiFetch(`/api/cases/${caseId}/images`);
+}
+
+export async function uploadCaseImages(caseId: string, files: File[]): Promise<CaseImage[]> {
+  const body = new FormData();
+  for (const file of files) {
+    body.append('images', file);
+  }
+
+  const res = await fetch(`${API_BASE}/api/cases/${caseId}/images`, {
+    method: 'POST',
+    credentials: 'include',
+    body,
+  });
+
+  if (!res.ok) {
+    const payload = await res.json().catch(() => ({ error: res.statusText }));
+    throw new ApiError(payload.error ?? 'Upload failed', res.status);
+  }
+
+  return res.json() as Promise<CaseImage[]>;
+}
+
+export async function deleteCaseImage(caseId: string, imageId: string): Promise<void> {
+  await apiFetch(`/api/cases/${caseId}/images/${imageId}`, { method: 'DELETE' });
 }
 
 export async function fetchInvoices(): Promise<Invoice[]> {

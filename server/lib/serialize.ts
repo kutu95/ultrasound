@@ -1,4 +1,12 @@
-import type { cases, invoices, invoiceItems, payments, paymentAllocations, settings } from '../db/schema.js';
+import type {
+  caseImages,
+  cases,
+  invoices,
+  invoiceItems,
+  payments,
+  paymentAllocations,
+  settings,
+} from '../db/schema.js';
 import { toISODateString } from './dates.js';
 
 export function serializeSettings(row: typeof settings.$inferSelect) {
@@ -36,6 +44,19 @@ export function serializeCase(row: typeof cases.$inferSelect) {
     invoice_id: row.invoiceId,
     created_at: row.createdAt.toISOString(),
     updated_at: row.updatedAt.toISOString(),
+  };
+}
+
+export function serializeCaseImage(row: typeof caseImages.$inferSelect) {
+  return {
+    id: row.id,
+    case_id: row.caseId,
+    original_name: row.originalName,
+    mime_type: row.mimeType,
+    size_bytes: row.sizeBytes,
+    sort_order: row.sortOrder,
+    created_at: row.createdAt.toISOString(),
+    url: `/api/cases/${row.caseId}/images/${row.id}`,
   };
 }
 

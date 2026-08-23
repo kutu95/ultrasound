@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { FreeBadge } from '../components/StatusBadge';
 import { createCase, deleteCase, fetchCases } from '../lib/api';
 import { formatCurrency, formatDate } from '../lib/format';
@@ -7,6 +7,7 @@ import type { CaseFormData, UltrasoundCase } from '../types/database';
 import CaseForm from '../components/CaseForm';
 
 export default function CasesPage() {
+  const navigate = useNavigate();
   const [cases, setCases] = useState<UltrasoundCase[]>([]);
   const [filterDate, setFilterDate] = useState('');
   const [loading, setLoading] = useState(true);
@@ -31,9 +32,9 @@ export default function CasesPage() {
   }, [loadCases]);
 
   async function handleCreate(form: CaseFormData) {
-    await createCase(form);
+    const created = await createCase(form);
     setShowForm(false);
-    await loadCases();
+    navigate(`/cases/${created.id}`);
   }
 
   async function handleDelete(c: UltrasoundCase) {
