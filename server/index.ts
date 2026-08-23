@@ -20,6 +20,9 @@ const PgSession = connectPgSimple(session);
 const app = express();
 const port = Number(process.env.PORT) || 3001;
 
+// Required for secure cookies behind Cloudflare Tunnel / reverse proxies
+app.set('trust proxy', 1);
+
 app.use(
   cors({
     origin: process.env.CORS_ORIGIN ?? 'http://localhost:5173',
