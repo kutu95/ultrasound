@@ -1,8 +1,11 @@
 openapi: 3.1.0
 info:
   title: Ultrasound Ledger Agent API
-  version: 1.0.0
-  description: Create and edit ultrasound case reports and attach screenshot images.
+  version: 1.1.0
+  description: >
+    Create and edit ultrasound case reports and attach screenshot images.
+    Prefer getCaseImageUploadLink for ChatGPT (user opens a browser upload page).
+    Base64 attach is legacy and rejects invalid/placeholder payloads.
 servers:
   - url: https://ultrasound.margies.app
 security:
@@ -24,19 +27,16 @@ paths:
           required: false
           schema:
             type: string
-          description: Partial pet name match
         - name: owner_surname
           in: query
           required: false
           schema:
             type: string
-          description: Partial owner surname match
         - name: limit
           in: query
           required: false
           schema:
             type: integer
-          description: Max results (default 20)
       responses:
         '200':
           description: Matching cases
@@ -57,11 +57,11 @@ paths:
               $ref: '#/components/schemas/CaseCreate'
       responses:
         '201':
-          description: Created case
+          description: Created case (includes upload_url for screenshots)
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Case'
+                $ref: '#/components/schemas/CaseCreated'
   /api/agent/cases/{id}:
     get:
       operationId: getCase
@@ -72,7 +72,6 @@ paths:
           required: true
           schema:
             type: string
-          description: Case UUID
       responses:
         '200':
           description: Case
@@ -89,7 +88,6 @@ paths:
           required: true
           schema:
             type: string
-          description: Case UUID
       requestBody:
         required: true
         content:
@@ -103,6 +101,39 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Case'
+  /api/agent/cases/{id}/upload-link:
+    get:
+      operationId: getCaseImageUploadLink
+      summary: Get a browser upload link for screenshots
+      description: >
+        PREFERRED for ChatGPT. Returns a short-lived upload_url. Tell the user
+        to open that link and select image files. No Base64 conversion needed.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Case UUID
+      responses:
+        '200':
+          description: Upload link
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  case_id:
+                    type: string
+                  upload_url:
+                    type: string
+                  expires_in_seconds:
+                    type: integer
+                  instructions:
+                    type: string
+                required:
+                  - case_id
+                  - upload_url
   /api/agent/cases/{id}/images:
     get:
       operationId: listCaseImages
@@ -113,7 +144,6 @@ paths:
           required: true
           schema:
             type: string
-          description: Case UUID
       responses:
         '200':
           description: Image metadata list
@@ -125,14 +155,17 @@ paths:
                   $ref: '#/components/schemas/CaseImage'
     post:
       operationId: attachCaseImage
-      summary: Attach a screenshot image to a case
+      summary: Attach image via Base64 or file_url (legacy)
+      description: >
+        Prefer getCaseImageUploadLink. If using this action, provide either a
+        real https file_url OR valid data_base64 image bytes. Never invent
+        placeholder Base64.
       parameters:
         - name: id
           in: path
           required: true
           schema:
             type: string
-          description: Case UUID
       requestBody:
         required: true
         content:
@@ -141,7 +174,72 @@ paths:
               $ref: '#/components/schemas/ImageAttach'
       responses:
         '201':
-          description: Attached image metadata
+          description: Attached image
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseImage'
+  /api/agent/cases/{id}/images/from-url:
+    post:
+      operationId: attachCaseImageFromUrl
+      summary: Attach image by downloading a public HTTPS URL
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - file_url
+              properties:
+                file_url:
+                  type: string
+                  description: Public HTTPS URL of the image
+                filename:
+                  type: string
+      responses:
+        '201':
+          description: Attached image
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseImage'
+  /api/agent/cases/{id}/images/upload:
+    post:
+      operationId: attachCaseImageFile
+      summary: Attach image via multipart file upload
+      description: >
+        Multipart form field name is "file". ChatGPT Actions often cannot send
+        true binary; prefer getCaseImageUploadLink instead.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+                filename:
+                  type: string
+      responses:
+        '201':
+          description: Attached image
           content:
             application/json:
               schema:
@@ -198,7 +296,57 @@ components:
         - exam_type
         - findings_text
         - conclusion_text
-    CaseCreate:
+    CaseCreated:
+      type: object
+      properties:
+        id:
+          type: string
+        exam_date:
+          type: string
+        owner_surname:
+          type: string
+        pet_name:
+          type: string
+        species:
+          type: string
+        exam_type:
+          type: string
+        findings_text:
+          type: string
+        conclusion_text:
+          type: string
+        image_notes:
+          type: string
+        standard_fee:
+          type: number
+        actual_fee:
+          type: number
+        is_free:
+          type: boolean
+        free_reason:
+          type: string
+        billing_note:
+          type: string
+        invoice_id:
+          type: string
+        created_at:
+          type: string
+        updated_at:
+          type: string
+        upload_url:
+          type: string
+          description: Open this link to attach screenshots in a browser
+        case_url:
+          type: string
+      required:
+        - id
+        - exam_date
+        - owner_surname
+        - pet_name
+        - exam_type
+        - findings_text
+        - conclusion_text
+        - upload_url    CaseCreate:
       type: object
       required:
         - exam_date
@@ -208,23 +356,18 @@ components:
       properties:
         exam_date:
           type: string
-          description: YYYY-MM-DD
         owner_surname:
           type: string
         pet_name:
           type: string
         species:
           type: string
-          description: dog, cat, or other species name
         exam_type:
           type: string
-          description: Echocardiography, Abdominal ultrasound, Pregnancy diagnosis, or Other
         findings_text:
           type: string
-          description: Full ultrasound report text
         conclusion_text:
           type: string
-          description: Short summary label
         image_notes:
           type: string
         standard_fee:
@@ -268,19 +411,18 @@ components:
           type: string
     ImageAttach:
       type: object
-      required:
-        - content_type
-        - data_base64
       properties:
         filename:
           type: string
-          description: e.g. kidney.png
         content_type:
           type: string
           description: image/jpeg, image/png, image/webp, or image/gif
         data_base64:
           type: string
-          description: Base64-encoded image bytes
+          description: Real base64 image bytes only — never placeholder text
+        file_url:
+          type: string
+          description: Alternative to data_base64 — public HTTPS image URL
     CaseImage:
       type: object
       properties:
@@ -300,9 +442,12 @@ components:
           type: string
         url:
           type: string
+        success:
+          type: boolean
       required:
         - id
         - case_id
         - original_name
         - mime_type
         - size_bytes
+        - success

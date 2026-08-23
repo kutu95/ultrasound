@@ -12,6 +12,8 @@ import { authRouter, ensureAdminUser } from './routes/auth.js';
 import { casesRouter, dashboardRouter, settingsRouter } from './routes/cases.js';
 import { invoicesRouter } from './routes/invoices.js';
 import { paymentsRouter, statementRouter } from './routes/payments.js';
+import { publicUploadRouter } from './routes/publicUpload.js';
+import fs from 'node:fs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const pool = createPool();
@@ -56,6 +58,19 @@ app.use('/api/auth', authRouter(db));
 
 // ChatGPT Custom GPT Actions — API key auth; mounted outside session wall
 app.use('/api/agent', requireAgentAuth, agentRouter(db));
+
+// Signed-token browser uploads (no session / no agent key)
+app.use('/api/public', publicUploadRouter(db));
+
+// Tokenized upload page (static HTML)
+app.get('/upload.html', (_req, res) => {
+  const filePath = path.join(__dirname, '..', 'public', 'upload.html');
+  if (!fs.existsSync(filePath)) {
+    res.status(404).send('Upload page missing');
+    return;
+  }
+  res.sendFile(filePath);
+});
 
 app.use('/api', requireAuth);
 app.use('/api/settings', settingsRouter(db));

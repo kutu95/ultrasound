@@ -1,16 +1,18 @@
 import { Router } from 'express';
 import { and, asc, desc, eq, ilike, sql } from 'drizzle-orm';
-import fs from 'node:fs';
+import multer from 'multer';
 import type { Database } from '../db/index.js';
 import { caseImages, cases } from '../db/schema.js';
-import { serializeCase, serializeCaseImage } from '../lib/serialize.js';
+import { storeValidatedCaseImage } from '../lib/caseImageStore.js';
 import {
-  caseImagePath,
-  ensureCaseUploadDir,
   getMaxUploadBytes,
-  isAllowedImageMime,
-  makeStoredName,
-} from '../lib/uploads.js';
+  isPrivateOrLocalHostname,
+  validateBase64Image,
+  validateImageBuffer,
+  type ImageValidationError,
+} from '../lib/imageValidation.js';
+import { serializeCase, serializeCaseImage } from '../lib/serialize.js';
+import { publicUploadPageUrl } from '../lib/uploadTokens.js';
 import { asyncHandler } from '../middleware/auth.js';
 
 const EXAM_TYPES = new Set([
@@ -143,19 +145,94 @@ function parseCasePatch(body: CaseBody, existing: typeof cases.$inferSelect) {
   } as const;
 }
 
-function decodeBase64Image(dataBase64: string): Buffer | null {
-  const trimmed = dataBase64.trim();
-  const raw = trimmed.includes(',') ? trimmed.slice(trimmed.indexOf(',') + 1) : trimmed;
+function sendValidationError(
+  res: import('express').Response,
+  err: ImageValidationError,
+) {
+  res.status(err.status).json({ error: err.error, message: err.message });
+}
+
+function requestOrigin(req: import('express').Request): string {
+  const proto = (req.headers['x-forwarded-proto'] as string) || req.protocol;
+  const host = req.headers['x-forwarded-host'] || req.headers.host;
+  if (host) return `${proto}://${host}`;
+  return process.env.CORS_ORIGIN?.replace(/\/$/, '') || 'https://ultrasound.margies.app';
+}
+
+async function loadAttachableCase(db: Database, caseId: string) {
+  const [existing] = await db.select().from(cases).where(eq(cases.id, caseId)).limit(1);
+  if (!existing) return { error: 'NOT_FOUND' as const };
+  if (existing.invoiceId) return { error: 'CASE_INVOICED' as const };
+  return { case: existing };
+}
+
+async function fetchRemoteImage(fileUrl: string) {
+  let url: URL;
   try {
-    const buf = Buffer.from(raw, 'base64');
-    return buf.length > 0 ? buf : null;
+    url = new URL(fileUrl);
   } catch {
-    return null;
+    return {
+      status: 400 as const,
+      error: 'INVALID_URL',
+      message: 'file_url is not a valid URL',
+    };
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+    return {
+      status: 400 as const,
+      error: 'INVALID_URL',
+      message: 'file_url must be http or https',
+    };
+  }
+  if (isPrivateOrLocalHostname(url.hostname)) {
+    return {
+      status: 400 as const,
+      error: 'URL_NOT_ALLOWED',
+      message: 'file_url host is not allowed',
+    };
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20_000);
+  try {
+    const res = await fetch(url.toString(), {
+      signal: controller.signal,
+      redirect: 'follow',
+      headers: { Accept: 'image/*,*/*' },
+    });
+    if (!res.ok) {
+      return {
+        status: 400 as const,
+        error: 'URL_FETCH_FAILED',
+        message: `Could not download file_url (HTTP ${res.status})`,
+      };
+    }
+    const contentType = res.headers.get('content-type')?.split(';')[0]?.trim() || null;
+    const arrayBuf = await res.arrayBuffer();
+    const buffer = Buffer.from(arrayBuf);
+    const validated = validateImageBuffer(buffer, contentType);
+    if ('error' in validated) return validated;
+    return validated;
+  } catch {
+    return {
+      status: 400 as const,
+      error: 'URL_FETCH_FAILED',
+      message: 'Could not download file_url',
+    };
+  } finally {
+    clearTimeout(timer);
   }
 }
 
 export function agentRouter(db: Database) {
   const router = Router();
+  const upload = multer({
+    storage: multer.memoryStorage(),
+    limits: {
+      fileSize: getMaxUploadBytes(),
+      files: 1,
+    },
+  });
 
   router.get(
     '/cases',
@@ -204,7 +281,12 @@ export function agentRouter(db: Database) {
       }
 
       const [row] = await db.insert(cases).values(parsed.values).returning();
-      res.status(201).json(serializeCase(row));
+      const created = serializeCase(row);
+      res.status(201).json({
+        ...created,
+        upload_url: publicUploadPageUrl(row.id, requestOrigin(req)),
+        case_url: `https://ultrasound.margies.app/cases/${row.id}`,
+      });
     }),
   );
 
@@ -217,7 +299,10 @@ export function agentRouter(db: Database) {
         return;
       }
       if (existing.invoiceId) {
-        res.status(403).json({ error: 'Cannot edit an invoiced case' });
+        res.status(403).json({
+          error: 'CASE_INVOICED',
+          message: 'Cannot edit an invoiced case',
+        });
         return;
       }
 
@@ -237,72 +322,179 @@ export function agentRouter(db: Database) {
     }),
   );
 
-  router.post(
-    '/cases/:id/images',
+  router.get(
+    '/cases/:id/upload-link',
     asyncHandler(async (req, res) => {
-      const [existing] = await db.select().from(cases).where(eq(cases.id, req.params.id)).limit(1);
-      if (!existing) {
+      const loaded = await loadAttachableCase(db, req.params.id);
+      if (loaded.error === 'NOT_FOUND') {
         res.status(404).json({ error: 'Case not found' });
         return;
       }
-      if (existing.invoiceId) {
-        res.status(403).json({ error: 'Cannot attach images to an invoiced case' });
+      if (loaded.error === 'CASE_INVOICED') {
+        res.status(403).json({
+          error: 'CASE_INVOICED',
+          message: 'Images cannot be attached after invoicing.',
+        });
+        return;
+      }
+      res.json({
+        case_id: loaded.case.id,
+        upload_url: publicUploadPageUrl(loaded.case.id, requestOrigin(req)),
+        expires_in_seconds: 3600,
+        instructions:
+          'Open upload_url in a browser and select ultrasound screenshots. No Base64 needed.',
+      });
+    }),
+  );
+
+  // Preferred for ChatGPT when a resolvable image URL is available
+  router.post(
+    '/cases/:id/images/from-url',
+    asyncHandler(async (req, res) => {
+      const loaded = await loadAttachableCase(db, req.params.id);
+      if (loaded.error === 'NOT_FOUND') {
+        res.status(404).json({ error: 'Case not found' });
+        return;
+      }
+      if (loaded.error === 'CASE_INVOICED') {
+        res.status(403).json({
+          error: 'CASE_INVOICED',
+          message: 'Images cannot be attached after invoicing.',
+        });
         return;
       }
 
       const body = req.body as CaseBody;
+      const fileUrl = asString(body.file_url).trim();
+      const filename = asString(body.filename).trim() || 'download.jpg';
+      if (!fileUrl) {
+        res.status(400).json({
+          error: 'MISSING_FILE_URL',
+          message: 'file_url is required',
+        });
+        return;
+      }
+
+      const fetched = await fetchRemoteImage(fileUrl);
+      if ('error' in fetched) {
+        sendValidationError(res, fetched);
+        return;
+      }
+
+      const saved = await storeValidatedCaseImage(db, loaded.case.id, fetched, filename);
+      res.status(201).json(saved);
+    }),
+  );
+
+  // Preferred binary upload (multipart) — works from browsers / tools; ChatGPT may not send true binary
+  router.post(
+    '/cases/:id/images/upload',
+    (req, res, next) => {
+      upload.single('file')(req, res, (err) => {
+        if (err) {
+          const message =
+            err instanceof multer.MulterError && err.code === 'LIMIT_FILE_SIZE'
+              ? 'Image is too large'
+              : err.message || 'Upload failed';
+          res.status(400).json({ error: 'UPLOAD_FAILED', message });
+          return;
+        }
+        next();
+      });
+    },
+    asyncHandler(async (req, res) => {
+      const loaded = await loadAttachableCase(db, req.params.id);
+      if (loaded.error === 'NOT_FOUND') {
+        res.status(404).json({ error: 'Case not found' });
+        return;
+      }
+      if (loaded.error === 'CASE_INVOICED') {
+        res.status(403).json({
+          error: 'CASE_INVOICED',
+          message: 'Images cannot be attached after invoicing.',
+        });
+        return;
+      }
+
+      const file = req.file;
+      if (!file) {
+        res.status(400).json({
+          error: 'MISSING_FILE',
+          message: 'multipart field "file" is required',
+        });
+        return;
+      }
+
+      const validated = validateImageBuffer(file.buffer, file.mimetype);
+      if ('error' in validated) {
+        sendValidationError(res, validated);
+        return;
+      }
+
+      const filename =
+        asString(req.body?.filename).trim() || file.originalname || 'upload.jpg';
+      const saved = await storeValidatedCaseImage(db, loaded.case.id, validated, filename);
+      res.status(201).json(saved);
+    }),
+  );
+
+  // Legacy Base64 JSON — kept for compatibility, with strict validation
+  router.post(
+    '/cases/:id/images',
+    asyncHandler(async (req, res) => {
+      const loaded = await loadAttachableCase(db, req.params.id);
+      if (loaded.error === 'NOT_FOUND') {
+        res.status(404).json({ error: 'Case not found' });
+        return;
+      }
+      if (loaded.error === 'CASE_INVOICED') {
+        res.status(403).json({
+          error: 'CASE_INVOICED',
+          message: 'Images cannot be attached after invoicing.',
+        });
+        return;
+      }
+
+      const body = req.body as CaseBody;
+
+      // Allow file_url on this path too for convenience
+      const fileUrl = asString(body.file_url).trim();
+      if (fileUrl) {
+        const fetched = await fetchRemoteImage(fileUrl);
+        if ('error' in fetched) {
+          sendValidationError(res, fetched);
+          return;
+        }
+        const filename = asString(body.filename).trim() || 'download.jpg';
+        const saved = await storeValidatedCaseImage(db, loaded.case.id, fetched, filename);
+        res.status(201).json(saved);
+        return;
+      }
+
       const filename = asString(body.filename).trim() || 'upload.bin';
       const contentType = asString(body.content_type).trim().toLowerCase();
       const dataBase64 = asString(body.data_base64);
 
-      if (!contentType || !dataBase64) {
-        res.status(400).json({ error: 'content_type and data_base64 are required' });
-        return;
-      }
-      if (!isAllowedImageMime(contentType)) {
-        res.status(400).json({ error: 'Only JPEG, PNG, WebP, and GIF images are allowed' });
-        return;
-      }
-
-      const buffer = decodeBase64Image(dataBase64);
-      if (!buffer) {
-        res.status(400).json({ error: 'Invalid data_base64' });
-        return;
-      }
-      if (buffer.length > getMaxUploadBytes()) {
-        res.status(400).json({ error: 'Image is too large' });
+      if (!dataBase64) {
+        res.status(400).json({
+          error: 'MISSING_IMAGE',
+          message:
+            'Provide multipart file via /images/upload, file_url, or valid data_base64. Do not send placeholder text.',
+        });
         return;
       }
 
-      const storedName = makeStoredName(contentType);
-      ensureCaseUploadDir(existing.id);
-      const filePath = caseImagePath(existing.id, storedName);
-      fs.writeFileSync(filePath, buffer);
+      const validated = validateBase64Image(dataBase64, contentType || null);
+      if ('error' in validated) {
+        sendValidationError(res, validated);
+        return;
+      }
 
-      const [{ maxOrder }] = await db
-        .select({
-          maxOrder: sql<number>`coalesce(max(${caseImages.sortOrder}), -1)`,
-        })
-        .from(caseImages)
-        .where(eq(caseImages.caseId, existing.id));
-
-      const [row] = await db
-        .insert(caseImages)
-        .values({
-          caseId: existing.id,
-          storedName,
-          originalName: filename,
-          mimeType: contentType,
-          sizeBytes: buffer.length,
-          sortOrder: Number(maxOrder) + 1,
-        })
-        .returning();
-
-      res.status(201).json(serializeCaseImage(row));
+      const saved = await storeValidatedCaseImage(db, loaded.case.id, validated, filename);
+      res.status(201).json(saved);
     }),
   );
 
-  // Convenience: list images for a case (helps ChatGPT confirm attaches)
   router.get(
     '/cases/:id/images',
     asyncHandler(async (req, res) => {
@@ -316,7 +508,7 @@ export function agentRouter(db: Database) {
         .from(caseImages)
         .where(eq(caseImages.caseId, req.params.id))
         .orderBy(asc(caseImages.sortOrder), asc(caseImages.createdAt));
-      res.json(rows.map(serializeCaseImage));
+      res.json(rows.map((row) => ({ ...serializeCaseImage(row), success: true })));
     }),
   );
 

@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Upload ultrasound screenshots</title>
+    <style>
+      :root {
+        font-family: system-ui, -apple-system, sans-serif;
+        color: #212529;
+        background: #f8f9fa;
+      }
+      body {
+        margin: 0;
+        padding: 1.25rem;
+      }
+      main {
+        max-width: 28rem;
+        margin: 2rem auto;
+        background: #fff;
+        border: 1px solid #dee2e6;
+        border-radius: 8px;
+        padding: 1.25rem;
+      }
+      h1 {
+        font-size: 1.25rem;
+        margin: 0 0 0.5rem;
+      }
+      p {
+        color: #6c757d;
+        font-size: 0.9rem;
+      }
+      input[type='file'] {
+        display: block;
+        width: 100%;
+        margin: 1rem 0;
+      }
+      button {
+        background: #0d6efd;
+        color: #fff;
+        border: 0;
+        border-radius: 6px;
+        padding: 0.6rem 1rem;
+        font: inherit;
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.6;
+        cursor: default;
+      }
+      .msg {
+        margin-top: 1rem;
+        font-size: 0.9rem;
+      }
+      .ok {
+        color: #0f5132;
+      }
+      .err {
+        color: #842029;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Upload screenshots</h1>
+      <p>Select one or more ultrasound images (JPEG, PNG, WebP, GIF), then upload.</p>
+      <form id="form">
+        <input id="files" type="file" accept="image/jpeg,image/png,image/webp,image/gif" multiple required />
+        <button id="btn" type="submit">Upload</button>
+      </form>
+      <div id="msg" class="msg"></div>
+    </main>
+    <script>
+      const params = new URLSearchParams(location.search);
+      const token = params.get('token') || '';
+      const form = document.getElementById('form');
+      const msg = document.getElementById('msg');
+      const btn = document.getElementById('btn');
+
+      if (!token) {
+        msg.className = 'msg err';
+        msg.textContent = 'Missing upload token. Ask ChatGPT for a fresh upload link.';
+        form.style.display = 'none';
+      }
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const input = document.getElementById('files');
+        if (!input.files || input.files.length === 0) return;
+        const body = new FormData();
+        for (const file of input.files) body.append('files', file);
+        btn.disabled = true;
+        msg.className = 'msg';
+        msg.textContent = 'Uploading…';
+        try {
+          const res = await fetch('/api/public/upload?token=' + encodeURIComponent(token), {
+            method: 'POST',
+            body,
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            throw new Error(data.message || data.error || 'Upload failed');
+          }
+          msg.className = 'msg ok';
+          msg.textContent =
+            'Uploaded ' + data.count + ' image' + (data.count === 1 ? '' : 's') + '. You can close this page.';
+          input.value = '';
+        } catch (err) {
+          msg.className = 'msg err';
+          msg.textContent = err instanceof Error ? err.message : 'Upload failed';
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>
