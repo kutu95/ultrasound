@@ -5,7 +5,6 @@ import type { Database } from '../db/index.js';
 import { caseImages, cases } from '../db/schema.js';
 import { storeValidatedCaseImage } from '../lib/caseImageStore.js';
 import {
-  getMaxUploadBytes,
   isPrivateOrLocalHostname,
   validateBase64Image,
   validateImageBuffer,
@@ -13,6 +12,7 @@ import {
 } from '../lib/imageValidation.js';
 import { serializeCase, serializeCaseImage } from '../lib/serialize.js';
 import { publicUploadPageUrl } from '../lib/uploadTokens.js';
+import { getMaxUploadBytes } from '../lib/uploads.js';
 import { asyncHandler } from '../middleware/auth.js';
 
 const EXAM_TYPES = new Set([
