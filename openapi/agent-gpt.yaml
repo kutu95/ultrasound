@@ -1,0 +1,308 @@
+openapi: 3.1.0
+info:
+  title: Ultrasound Ledger Agent API
+  version: 1.0.0
+  description: Create and edit ultrasound case reports and attach screenshot images.
+servers:
+  - url: https://ultrasound.margies.app
+security:
+  - ApiKeyAuth: []
+paths:
+  /api/agent/cases:
+    get:
+      operationId: listCases
+      summary: Search or list case reports
+      parameters:
+        - name: exam_date
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Exam date YYYY-MM-DD
+        - name: pet_name
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Partial pet name match
+        - name: owner_surname
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Partial owner surname match
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+          description: Max results (default 20)
+      responses:
+        '200':
+          description: Matching cases
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Case'
+    post:
+      operationId: createCase
+      summary: Create a case report
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CaseCreate'
+      responses:
+        '201':
+          description: Created case
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
+  /api/agent/cases/{id}:
+    get:
+      operationId: getCase
+      summary: Get one case report
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Case UUID
+      responses:
+        '200':
+          description: Case
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
+    patch:
+      operationId: updateCase
+      summary: Edit a case report (not allowed if invoiced)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Case UUID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CasePatch'
+      responses:
+        '200':
+          description: Updated case
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Case'
+  /api/agent/cases/{id}/images:
+    get:
+      operationId: listCaseImages
+      summary: List images attached to a case
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Case UUID
+      responses:
+        '200':
+          description: Image metadata list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CaseImage'
+    post:
+      operationId: attachCaseImage
+      summary: Attach a screenshot image to a case
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Case UUID
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ImageAttach'
+      responses:
+        '201':
+          description: Attached image metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CaseImage'
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+  schemas:
+    Case:
+      type: object
+      properties:
+        id:
+          type: string
+        exam_date:
+          type: string
+        owner_surname:
+          type: string
+        pet_name:
+          type: string
+        species:
+          type: string
+        exam_type:
+          type: string
+        findings_text:
+          type: string
+        conclusion_text:
+          type: string
+        image_notes:
+          type: string
+        standard_fee:
+          type: number
+        actual_fee:
+          type: number
+        is_free:
+          type: boolean
+        free_reason:
+          type: string
+        billing_note:
+          type: string
+        invoice_id:
+          type: string
+        created_at:
+          type: string
+        updated_at:
+          type: string
+      required:
+        - id
+        - exam_date
+        - owner_surname
+        - pet_name
+        - exam_type
+        - findings_text
+        - conclusion_text
+    CaseCreate:
+      type: object
+      required:
+        - exam_date
+        - owner_surname
+        - pet_name
+        - exam_type
+      properties:
+        exam_date:
+          type: string
+          description: YYYY-MM-DD
+        owner_surname:
+          type: string
+        pet_name:
+          type: string
+        species:
+          type: string
+          description: dog, cat, or other species name
+        exam_type:
+          type: string
+          description: Echocardiography, Abdominal ultrasound, Pregnancy diagnosis, or Other
+        findings_text:
+          type: string
+          description: Full ultrasound report text
+        conclusion_text:
+          type: string
+          description: Short summary label
+        image_notes:
+          type: string
+        standard_fee:
+          type: number
+        actual_fee:
+          type: number
+        is_free:
+          type: boolean
+        free_reason:
+          type: string
+        billing_note:
+          type: string
+    CasePatch:
+      type: object
+      properties:
+        exam_date:
+          type: string
+        owner_surname:
+          type: string
+        pet_name:
+          type: string
+        species:
+          type: string
+        exam_type:
+          type: string
+        findings_text:
+          type: string
+        conclusion_text:
+          type: string
+        image_notes:
+          type: string
+        standard_fee:
+          type: number
+        actual_fee:
+          type: number
+        is_free:
+          type: boolean
+        free_reason:
+          type: string
+        billing_note:
+          type: string
+    ImageAttach:
+      type: object
+      required:
+        - content_type
+        - data_base64
+      properties:
+        filename:
+          type: string
+          description: e.g. kidney.png
+        content_type:
+          type: string
+          description: image/jpeg, image/png, image/webp, or image/gif
+        data_base64:
+          type: string
+          description: Base64-encoded image bytes
+    CaseImage:
+      type: object
+      properties:
+        id:
+          type: string
+        case_id:
+          type: string
+        original_name:
+          type: string
+        mime_type:
+          type: string
+        size_bytes:
+          type: integer
+        sort_order:
+          type: integer
+        created_at:
+          type: string
+        url:
+          type: string
+      required:
+        - id
+        - case_id
+        - original_name
+        - mime_type
+        - size_bytes

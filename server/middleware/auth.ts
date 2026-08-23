@@ -17,14 +17,20 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
 }
 
 function extractAgentApiKey(req: Request): string | null {
-  const headerKey = req.header('x-api-key')?.trim();
-  if (headerKey) return headerKey;
+  // ChatGPT Actions may send the key in several shapes depending on auth UI settings.
+  const fromCustom =
+    req.header('x-api-key')?.trim() ||
+    req.header('api-key')?.trim() ||
+    req.header('apikey')?.trim();
+  if (fromCustom) return fromCustom;
 
   const auth = req.header('authorization')?.trim();
-  if (auth?.toLowerCase().startsWith('bearer ')) {
+  if (!auth) return null;
+  if (auth.toLowerCase().startsWith('bearer ')) {
     return auth.slice(7).trim();
   }
-  return null;
+  // Some GPT Action configs send Authorization: <key> with no Bearer prefix.
+  return auth;
 }
 
 function secretsEqual(a: string, b: string): boolean {
