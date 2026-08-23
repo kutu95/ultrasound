@@ -4,8 +4,9 @@ import { eq } from 'drizzle-orm';
 import type { Database } from '../db/index.js';
 import { cases } from '../db/schema.js';
 import { storeValidatedCaseImage } from '../lib/caseImageStore.js';
-import { getMaxUploadBytes, validateImageBuffer } from '../lib/imageValidation.js';
+import { validateImageBuffer } from '../lib/imageValidation.js';
 import { verifyCaseUploadToken } from '../lib/uploadTokens.js';
+import { getMaxUploadBytes } from '../lib/uploads.js';
 import { asyncHandler } from '../middleware/auth.js';
 
 /**
