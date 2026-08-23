@@ -66,22 +66,22 @@ npm run dev
 
 Sign in with the default admin credentials from `.env` (`ADMIN_USERNAME` / `ADMIN_PASSWORD`, default `admin` / `admin`).
 
-## Environment variables
+## Database
 
-| Variable | Description |
-|----------|-------------|
-| `DATABASE_URL` | Full PostgreSQL connection string (alternative to individual `DATABASE_*` vars) |
-| `DATABASE_HOST` | Database host (default `localhost`) |
-| `DATABASE_PORT` | Database port (default `5432`) |
-| `DATABASE_NAME` | Database name |
-| `DATABASE_USER` | Database user |
-| `DATABASE_PASSWORD` | Database password |
-| `PORT` | API server port (default `3001`) |
-| `SESSION_SECRET` | Session signing secret |
-| `CORS_ORIGIN` | Frontend origin for CORS (default `http://localhost:5173`) |
-| `ADMIN_USERNAME` | Initial admin username (created on first start) |
-| `ADMIN_PASSWORD` | Initial admin password |
-| `VITE_API_URL` | Frontend API base URL (optional; dev uses Vite proxy) |
+Local development can use a dedicated database with `DATABASE_SCHEMA=public`.
+
+On the shared server Postgres, set:
+
+```env
+DATABASE_HOST=127.0.0.1
+DATABASE_PORT=54322
+DATABASE_NAME=postgres
+DATABASE_USER=postgres
+DATABASE_PASSWORD=postgres
+DATABASE_SCHEMA=ultrasound
+```
+
+Migrations create the `ultrasound` schema (if needed) and apply all tables there.
 
 ## Production
 

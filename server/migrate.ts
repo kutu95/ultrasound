@@ -1,15 +1,32 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createPool } from './db/index.js';
+import { createPool, getDatabaseSchema } from './db/index.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const migrationsDir = path.join(__dirname, '..', 'migrations');
 
+function quoteIdent(name: string): string {
+  if (!/^[a-z_][a-z0-9_]*$/i.test(name)) {
+    throw new Error(`Invalid schema name: ${name}`);
+  }
+  return `"${name}"`;
+}
+
 async function migrate() {
   const pool = createPool();
+  const schemaName = getDatabaseSchema();
+  const schemaIdent = quoteIdent(schemaName);
 
   try {
+    if (schemaName !== 'public') {
+      await pool.query(`CREATE SCHEMA IF NOT EXISTS ${schemaIdent}`);
+      console.log(`Using schema ${schemaName}`);
+    }
+
+    // Ensure migration tracking and DDL land in the app schema
+    await pool.query(`SET search_path TO ${schemaIdent}, public, extensions`);
+
     await pool.query(`
       CREATE TABLE IF NOT EXISTS schema_migrations (
         version TEXT PRIMARY KEY,
@@ -38,6 +55,7 @@ async function migrate() {
       console.log(`Applying ${file}…`);
       await pool.query('BEGIN');
       try {
+        await pool.query(`SET LOCAL search_path TO ${schemaIdent}, public, extensions`);
         await pool.query(sql);
         await pool.query('INSERT INTO schema_migrations (version) VALUES ($1)', [version]);
         await pool.query('COMMIT');

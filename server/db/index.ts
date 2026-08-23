@@ -5,6 +5,10 @@ import * as schema from './schema.js';
 
 const { Pool } = pg;
 
+export function getDatabaseSchema(): string {
+  return process.env.DATABASE_SCHEMA?.trim() || 'public';
+}
+
 export function getDatabaseUrl(): string {
   if (process.env.DATABASE_URL) {
     return process.env.DATABASE_URL;
@@ -20,7 +24,12 @@ export function getDatabaseUrl(): string {
 }
 
 export function createPool() {
-  return new Pool({ connectionString: getDatabaseUrl() });
+  const schemaName = getDatabaseSchema();
+  return new Pool({
+    connectionString: getDatabaseUrl(),
+    // Keep app tables in their own schema on the shared server Postgres
+    options: schemaName === 'public' ? undefined : `-c search_path=${schemaName},public,extensions`,
+  });
 }
 
 export function createDb(pool?: pg.Pool) {
