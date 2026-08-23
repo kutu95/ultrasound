@@ -153,10 +153,13 @@ function sendValidationError(
 }
 
 function requestOrigin(req: import('express').Request): string {
+  const configured = process.env.CORS_ORIGIN?.replace(/\/$/, '');
   const proto = (req.headers['x-forwarded-proto'] as string) || req.protocol;
   const host = req.headers['x-forwarded-host'] || req.headers.host;
-  if (host) return `${proto}://${host}`;
-  return process.env.CORS_ORIGIN?.replace(/\/$/, '') || 'https://ultrasound.margies.app';
+  if (host && !String(host).startsWith('127.0.0.1') && !String(host).startsWith('localhost')) {
+    return `${proto}://${host}`;
+  }
+  return configured || 'https://ultrasound.margies.app';
 }
 
 async function loadAttachableCase(db: Database, caseId: string) {
