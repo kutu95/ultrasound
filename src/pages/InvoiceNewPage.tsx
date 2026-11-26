@@ -123,6 +123,7 @@ export default function InvoiceNewPage() {
                     <th>Owner</th>
                     <th>Species</th>
                     <th>Exam</th>
+                    <th className="text-right">Actual fee</th>
                     <th>Summary</th>
                   </tr>
                 </thead>
@@ -135,6 +136,9 @@ export default function InvoiceNewPage() {
                       <td>{c.owner_surname}</td>
                       <td>{displaySpecies(c.species)}</td>
                       <td>{c.exam_type}</td>
+                      <td className="text-right">
+                        {c.is_free ? 'Free' : formatCurrency(c.actual_fee)}
+                      </td>
                       <td className="text-muted">{c.conclusion_text || '—'}</td>
                     </tr>
                   ))}
@@ -142,8 +146,7 @@ export default function InvoiceNewPage() {
               </table>
             </div>
             <p className="text-muted" style={{ marginTop: '0.75rem', marginBottom: 0 }}>
-              Billing rule: $300 minimum covers first 1–2 billable exams; each additional exam $150.
-              Free exams are $0.
+              Suggested total is the sum of each case&apos;s actual fee.
             </p>
           </div>
 

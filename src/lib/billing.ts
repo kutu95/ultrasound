@@ -6,19 +6,10 @@ export interface LineItemSuggestion {
   amount: number;
 }
 
-/**
- * Billing rule:
- * - $300 minimum covers the first 1–2 billable (non-free) exams on a date
- * - Each additional billable exam is $150
- * - Free exams contribute $0
- */
+/** Suggested invoice total is the sum of each case's actual fee. */
 export function calculateSuggestedTotal(cases: UltrasoundCase[]): number {
-  const billable = cases.filter((c) => !c.is_free);
-  const count = billable.length;
-
-  if (count === 0) return 0;
-  if (count <= 2) return 300;
-  return 300 + (count - 2) * 150;
+  const cents = cases.reduce((sum, c) => sum + Math.round(Number(c.actual_fee) * 100), 0);
+  return cents / 100;
 }
 
 export function calculateLineItems(cases: UltrasoundCase[]): LineItemSuggestion[] {
@@ -29,22 +20,8 @@ export function calculateLineItems(cases: UltrasoundCase[]): LineItemSuggestion[
   return sorted.map((c) => ({
     case_id: c.id,
     description: formatLineDescription(c),
-    amount: c.is_free ? 0 : calculateCaseAmount(cases, c.id),
+    amount: Math.round(Number(c.actual_fee) * 100) / 100,
   }));
-}
-
-function calculateCaseAmount(allCases: UltrasoundCase[], caseId: string): number {
-  const target = allCases.find((c) => c.id === caseId);
-  if (!target || target.is_free) return 0;
-
-  const billable = allCases
-    .filter((c) => !c.is_free)
-    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-
-  const count = billable.length;
-
-  if (count === 1) return 300;
-  return 150;
 }
 
 export function formatLineDescription(c: UltrasoundCase): string {

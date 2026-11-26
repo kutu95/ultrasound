@@ -106,16 +106,9 @@ server/
 src/                 React frontend
 ```
 
-## Billing rule
+## Billing
 
-| Billable exams | Suggested total |
-|----------------|-----------------|
-| 1              | $300            |
-| 2              | $300            |
-| 3              | $450            |
-| 4              | $600            |
-
-Free exams are $0. All amounts are manually editable.
+The suggested invoice total is the sum of each linked case's actual fee. Free cases store an actual fee of $0. The final total can still be edited; a reason is required when it differs from the suggested total.
 
 ## Authentication
 
